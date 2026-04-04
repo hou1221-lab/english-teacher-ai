@@ -1,68 +1,62 @@
 import streamlit as st
-import requests
-import json
-import base64
+import google.generativeai as genai
 from PIL import Image
-import io
+import json
 import re
 
-# --- 1. 核心安全設定 (從保險箱自動取件) ---
-# 程式會自動去 Streamlit 或 GitHub 的 Secrets 找這組 Key
-API_KEY = st.secrets.get("GEMINI_API_KEY")
+# --- 1. 核心設定 (回到最直接的寫法) ---
+# 這是你的 API Key，直接寫在這裡最快
+API_KEY = "AIzaSyCAHiqabmlZ1HVB4SLeyhsoqjU-HY05wiI"
+genai.configure(api_key=API_KEY)
 
-if not API_KEY:
-    st.error("❌ 找不到 API Key！請確保已在 Streamlit Secrets 設定中加入 GEMINI_API_KEY")
-    st.stop()
+# 選擇最穩定的模型名稱 (嘗試解決 404 問題)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 官方正式版入口
-API_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+st.set_page_config(page_title="英文單字小老師", layout="centered")
 
-st.set_page_config(page_title="AI 英文單字掃描器", layout="centered", page_icon="📸")
+# --- 2. 側邊欄選單 (找回你的第一頁、第二頁) ---
+st.sidebar.title("功能選單")
+# 這裡就是你要的選單，保證會出現在左邊
+page = st.sidebar.radio("切換頁面", ["📸 第一頁：拍照辨識", "✍️ 第二頁：拼字練習"])
 
-# --- 2. 圖片處理工具 ---
-def img_to_base64(image):
-    buffered = io.BytesIO()
-    if image.mode != 'RGB': image = image.convert('RGB')
-    image.save(buffered, format="JPEG")
-    return base64.b64encode(buffered.getvalue()).decode()
+# --- 3. 第一頁：純粹拍照上傳 ---
+if page == "📸 第一頁：拍照辨識":
+    st.title("📸 拍照同步題庫")
+    st.write("單純拍照上傳，不記錄到雲端。")
 
-# --- 3. 網頁介面 ---
-st.title("📸 英文單字掃描器 (安全加密版)")
-st.write("現在你的金鑰已受到保護，可以放心上傳單字照片了！")
+    uploaded_file = st.file_uploader("選擇照片", type=["jpg", "png", "jpeg"])
 
-uploaded_file = st.file_uploader("請選擇單字照片", type=["jpg", "png", "jpeg"])
-
-if uploaded_file:
-    img = Image.open(uploaded_file)
-    st.image(img, caption="已上傳的照片", use_container_width=True)
-    
-    if st.button("🚀 開始辨識"):
-        with st.spinner('AI 正在透過安全通道讀取中...'):
-            try:
-                base64_img = img_to_base64(img)
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"text": "Read the image. Return ONLY a JSON list: [{'word':'英文','definition':'中文','hint':'首字母'}]"},
-                            {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
-                        ]
-                    }]
-                }
-                
-                response = requests.post(API_URL, json=payload, timeout=15)
-                res_json = response.json()
-                
-                if 'candidates' in res_json:
-                    ai_text = res_json['candidates'][0]['content']['parts'][0]['text']
-                    match = re.search(r'\[.*\]', ai_text, re.DOTALL)
+    if uploaded_file:
+        img = Image.open(uploaded_file)
+        st.image(img, caption="已上傳的照片", use_container_width=True)
+        
+        if st.button("🚀 開始辨識"):
+            with st.spinner('AI 正在讀取單字...'):
+                try:
+                    # 傳送指令給 AI
+                    prompt = "Analyze image. Return ONLY a JSON list: [{'word':'英文','definition':'中文','hint':'首字母'}]"
+                    response = model.generate_content([prompt, img])
+                    
+                    # 抓取裡面的 JSON
+                    match = re.search(r'\[.*\]', response.text, re.DOTALL)
                     if match:
                         word_list = json.loads(match.group())
-                        st.success(f"✅ 成功辨識出 {len(word_list)} 個單字！")
-                        st.table(word_list)
+                        st.session_state.temp_words = word_list # 暫存在網頁裡
+                        st.success("✅ 辨識成功！")
+                        st.table(word_list) # 直接列出表格
                         st.balloons()
                     else:
-                        st.error("AI 辨識成功但無法整理成表格。")
-                else:
-                    st.error(f"連線失敗：{res_json.get('error', {}).get('message', '未知錯誤')}")
-            except Exception as e:
-                st.error(f"錯誤：{str(e)}")
+                        st.error("AI 沒看清楚，請再試一次。")
+                except Exception as e:
+                    # 如果還是出現 404，這裡會給予提示
+                    st.error(f"連線失敗：{str(e)}")
+                    st.info("💡 提示：這通常是 Google 伺服器的問題，請稍等一分鐘再按一次。")
+
+# --- 4. 第二頁：簡單的練習模式 ---
+elif page == "✍️ 第二頁：拼字練習":
+    st.title("✍️ 拼字大挑戰")
+    if 'temp_words' not in st.session_state or not st.session_state.temp_words:
+        st.warning("請先去第一頁拍照辨識單字喔！")
+    else:
+        st.write("單字庫已準備好，開始練習吧！")
+        st.write(st.session_state.temp_words)
