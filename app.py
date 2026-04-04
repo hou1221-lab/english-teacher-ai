@@ -9,10 +9,7 @@ from PIL import Image
 import io
 
 # --- 1. 核心設定 ---
-# 使用你最新的 API Key
 API_KEY = "AIzaSyCAHiqabmlZ1HVB4SLeyhsoqjU-HY05wiI"
-
-# 直接指定 Google 正式版的 API 網址 (避開 v1beta 標籤)
 API_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
 
 # 試算表連結
@@ -24,6 +21,7 @@ st.set_page_config(page_title="Gemini 雲端小老師", layout="centered", page_
 # --- 2. 工具函數 ---
 def img_to_base64(image):
     buffered = io.BytesIO()
+    if image.mode != 'RGB': image = image.convert('RGB')
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode()
 
@@ -35,75 +33,59 @@ def load_data():
 
 if 'word_bank' not in st.session_state:
     st.session_state.word_bank = load_data()
-if 'current_q' not in st.session_state:
-    st.session_state.current_q = None
 
 # --- 3. 側邊欄 ---
 st.sidebar.title("🧑‍🏫 雲端選單")
-page = st.sidebar.radio("請選擇模式", ["📸 拍照同步題庫", "✍️ Lv1. 拼字大挑戰", "🧠 Lv2. 小六情境測驗"])
+page = st.sidebar.radio("模式", ["📸 拍照同步題庫", "✍️ 練習模式"])
 
-# --- 4. 模式切換 ---
+# --- 4. 拍照辨識邏輯 (加強解析版) ---
 if "📸 拍照同步題庫" in page:
     st.title("📸 拍照建立題庫")
-    st.info("🤖 目前連線：官方標準穩定通道 (REST)")
-    
     uploaded_file = st.file_uploader("上傳單字照片", type=["jpg", "png", "jpeg"])
     if uploaded_file:
         img = Image.open(uploaded_file)
         st.image(img, use_container_width=True)
         
         if st.button("🚀 開始辨識"):
-            with st.spinner('正在與雲端伺服器對接...'):
+            with st.spinner('AI 正在拆信中...'):
                 try:
-                    # 準備圖片資料
-                    base64_img = img_to_base64(img)
-                    
-                    # 準備傳送給 Google 的信件內容 (JSON)
+                    base64_data = img_to_base64(img)
                     payload = {
                         "contents": [{
                             "parts": [
-                                {"text": "List English words and Chinese meanings from image as JSON list: [{'word':'...', 'definition':'...', 'hint':'...'}]"},
-                                {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
+                                {"text": "Extract English-Chinese vocabulary as JSON array: [{'word':'...', 'definition':'...', 'hint':'...'}]"},
+                                {"inline_data": {"mime_type": "image/jpeg", "data": base64_data}}
                             ]
                         }]
                     }
                     
-                    # 直接「寄信」給 Google
                     response = requests.post(API_URL, json=payload)
-                    res_json = response.json()
+                    res_data = response.json()
                     
-                    # 解析回傳內容
-                    ai_text = res_json['candidates'][0]['content']['parts'][0]['text']
-                    match = re.search(r'\[.*\]', ai_text, re.DOTALL)
-                    
-                    if match:
-                        st.session_state.word_bank = json.loads(match.group())
-                        st.success(f"✅ 成功辨識 {len(st.session_state.word_bank)} 個單字！")
-                        st.table(st.session_state.word_bank)
-                        st.balloons()
+                    # 🛡️ 加強型解析：防止 candidates 找不到
+                    if 'candidates' in res_data and len(res_data['candidates']) > 0:
+                        content = res_data['candidates'][0].get('content', {})
+                        parts = content.get('parts', [])
+                        if parts:
+                            ai_text = parts[0].get('text', '')
+                            match = re.search(r'\[.*\]', ai_text, re.DOTALL)
+                            if match:
+                                st.session_state.word_bank = json.loads(match.group())
+                                st.success("🎉 大成功！單字已飛進雲端。")
+                                st.table(st.session_state.word_bank)
+                                st.balloons()
+                            else:
+                                st.error("AI 讀取成功但格式不對。")
+                        else:
+                            st.error("AI 沒回傳文字，請換張照片。")
                     else:
-                        st.error("AI 讀取成功，但找不到單字列表。")
+                        # 顯示更精確的錯誤，如果是額度問題就會顯示在這裡
+                        err_msg = res_data.get('error', {}).get('message', 'AI 目前無法回應')
+                        st.error(f"AI 老師沒開門：{err_msg}")
+                        
                 except Exception as e:
-                    st.error(f"連線還是失敗嗎？錯誤：{e}")
-                    st.warning("如果持續出現錯誤，請確認 API Key 是否在 Google AI Studio 仍顯示為有效。")
+                    st.error(f"程式解析出錯：{e}")
 
-elif "✍️ Lv1. 拼字大挑戰" in page:
-    st.title("✍️ 拼字大挑戰")
-    if not st.session_state.word_bank:
-        st.warning("題庫空空的，請先拍照喔！")
-    else:
-        if st.button("🎯 換一題") or st.session_state.current_q is None:
-            st.session_state.current_q = random.choice(st.session_state.word_bank)
-        q = st.session_state.current_q
-        st.subheader(f"中文意思：{q['definition']}")
-        ans = st.text_input("請輸入單字：").strip()
-        if st.button("檢查答案"):
-            if ans.lower() == q['word'].lower():
-                st.success("🎉 答對了！")
-                st.balloons()
-            else:
-                st.error(f"差一點！正確答案是：{q['word']}")
-
-elif "🧠 Lv2. 小六情境測驗" in page:
-    st.title("🧠 情境測驗")
-    st.write("雲端同步正常。")
+elif "✍️ 練習模式" in page:
+    st.title("✍️ 練習模式")
+    st.write(st.session_state.word_bank)
