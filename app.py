@@ -1,119 +1,109 @@
 import streamlit as st
-import google.generativeai as genai
-from PIL import Image
+import requests
 import json
 import pandas as pd
 import re
 import random
+import base64
+from PIL import Image
+import io
 
-# --- 1. 核心安全設定 (換上你的新通行證) ---
-# 使用你剛才產生的全新 API Key
-NEW_API_KEY = "AIzaSyCAHiqabmlZ1HVB4SLeyhsoqjU-HY05wiI"
+# --- 1. 核心設定 ---
+# 使用你最新的 API Key
+API_KEY = "AIzaSyCAHiqabmlZ1HVB4SLeyhsoqjU-HY05wiI"
 
-# 強制使用穩定 REST 模式，這能解決 404 v1beta 的報錯問題
-genai.configure(api_key=NEW_API_KEY, transport='rest')
+# 直接指定 Google 正式版的 API 網址 (避開 v1beta 標籤)
+API_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
 
-# 指定最穩定的型號名稱 (去掉 models/ 前綴以增加相容性)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
-# 你的 Google Sheet 資訊
+# 試算表連結
 SHEET_ID = "1Katc3p0WaavcPSFQU1pBX8QovS-wmfWbzm6M3ifiUJo"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
 
 st.set_page_config(page_title="Gemini 雲端小老師", layout="centered", page_icon="🧑‍🏫")
 
-# --- 2. 資料處理邏輯 ---
+# --- 2. 工具函數 ---
+def img_to_base64(image):
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
 def load_data():
     try:
-        # 從雲端試算表抓取資料
-        df = pd.read_csv(CSV_URL)
-        return df.to_dict('records')
+        return pd.read_csv(CSV_URL).to_dict('records')
     except:
         return []
 
-# 初始化單字庫狀態
 if 'word_bank' not in st.session_state:
     st.session_state.word_bank = load_data()
 if 'current_q' not in st.session_state:
     st.session_state.current_q = None
 
-# --- 3. 側邊欄導覽 (確保選單永遠存在) ---
+# --- 3. 側邊欄 ---
 st.sidebar.title("🧑‍🏫 雲端選單")
 page = st.sidebar.radio("請選擇模式", ["📸 拍照同步題庫", "✍️ Lv1. 拼字大挑戰", "🧠 Lv2. 小六情境測驗"])
 
-if st.sidebar.button("🗑️ 清空所有單字"):
-    st.session_state.word_bank = []
-    st.rerun()
-
-# --- 4. 功能頁面 ---
-
-# 模式一：拍照同步 (核心辨識功能)
+# --- 4. 模式切換 ---
 if "📸 拍照同步題庫" in page:
-    st.title("📸 拍照建立雲端題庫")
-    st.info("🤖 AI 老師已更新通行證，目前狀態：連線穩定！")
+    st.title("📸 拍照建立題庫")
+    st.info("🤖 目前連線：官方標準穩定通道 (REST)")
     
-    uploaded_file = st.file_uploader("請上傳單字照片 (JPG/PNG)", type=["jpg", "png", "jpeg"])
+    uploaded_file = st.file_uploader("上傳單字照片", type=["jpg", "png", "jpeg"])
     if uploaded_file:
         img = Image.open(uploaded_file)
-        st.image(img, caption="待辨識的照片", use_container_width=True)
+        st.image(img, use_container_width=True)
         
-        if st.button("🚀 開始辨識並同步到雲端"):
-            with st.spinner('Gemini 正在看照片，請稍候...'):
+        if st.button("🚀 開始辨識"):
+            with st.spinner('正在與雲端伺服器對接...'):
                 try:
-                    # 強制轉成 RGB 格式確保相容性
-                    if img.mode != 'RGB': img = img.convert('RGB')
+                    # 準備圖片資料
+                    base64_img = img_to_base64(img)
                     
-                    # 傳送指令給 AI (簡化 Prompt 以確保 JSON 格式正確)
-                    prompt = "Read image. Return ONLY JSON list: [{'word':'英文','definition':'中文','hint':'首字母'}]"
-                    response = model.generate_content([prompt, img])
+                    # 準備傳送給 Google 的信件內容 (JSON)
+                    payload = {
+                        "contents": [{
+                            "parts": [
+                                {"text": "List English words and Chinese meanings from image as JSON list: [{'word':'...', 'definition':'...', 'hint':'...'}]"},
+                                {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
+                            ]
+                        }]
+                    }
                     
-                    # 抓取 JSON 陣列
-                    match = re.search(r'\[.*\]', response.text, re.DOTALL)
+                    # 直接「寄信」給 Google
+                    response = requests.post(API_URL, json=payload)
+                    res_json = response.json()
+                    
+                    # 解析回傳內容
+                    ai_text = res_json['candidates'][0]['content']['parts'][0]['text']
+                    match = re.search(r'\[.*\]', ai_text, re.DOTALL)
+                    
                     if match:
-                        new_words = json.loads(match.group())
-                        st.session_state.word_bank = new_words
-                        st.success(f"✅ 成功辨識 {len(new_words)} 個單字！單字庫已更新。")
-                        st.table(new_words) 
-                        st.balloons() 
+                        st.session_state.word_bank = json.loads(match.group())
+                        st.success(f"✅ 成功辨識 {len(st.session_state.word_bank)} 個單字！")
+                        st.table(st.session_state.word_bank)
+                        st.balloons()
                     else:
-                        st.error("AI 辨識成功但回傳格式不符，請再試一次。")
+                        st.error("AI 讀取成功，但找不到單字列表。")
                 except Exception as e:
-                    # 詳細錯誤回報，方便除錯
-                    st.error(f"連線失敗：{str(e)}")
+                    st.error(f"連線還是失敗嗎？錯誤：{e}")
+                    st.warning("如果持續出現錯誤，請確認 API Key 是否在 Google AI Studio 仍顯示為有效。")
 
-# 模式二：拼字挑戰
 elif "✍️ Lv1. 拼字大挑戰" in page:
     st.title("✍️ 拼字大挑戰")
     if not st.session_state.word_bank:
-        st.warning("題庫目前是空的，請先去拍照同步單字喔！")
+        st.warning("題庫空空的，請先拍照喔！")
     else:
-        if st.button("🎯 隨機抽一題") or st.session_state.current_q is None:
+        if st.button("🎯 換一題") or st.session_state.current_q is None:
             st.session_state.current_q = random.choice(st.session_state.word_bank)
-        
         q = st.session_state.current_q
         st.subheader(f"中文意思：{q['definition']}")
-        st.write(f"提示：首字母是 **{q['hint']}**，單字共有 {len(q['word'])} 個字母")
-        
-        # 讓使用者輸入答案
-        ans = st.text_input("請輸入正確英文單字：").strip()
+        ans = st.text_input("請輸入單字：").strip()
         if st.button("檢查答案"):
             if ans.lower() == q['word'].lower():
-                st.success("🎉 太棒了！答對了！")
+                st.success("🎉 答對了！")
                 st.balloons()
             else:
-                st.error(f"差一點點！正確答案是：{q['word']}")
+                st.error(f"差一點！正確答案是：{q['word']}")
 
-# 模式三：情境測驗
 elif "🧠 Lv2. 小六情境測驗" in page:
-    st.title("🧠 小六情境測驗")
-    st.write("已成功連動雲端單字庫。")
-    if st.button("🎲 生成 AI 題目"):
-        with st.spinner('Gemini 老師正在編撰故事題目...'):
-            try:
-                # 簡單生成情境題
-                words = ", ".join([w['word'] for w in st.session_state.word_bank[:5]])
-                story_prompt = f"Use these words: {words}. Write a short story for a 6th grader with one fill-in-the-blank question."
-                response = model.generate_content(story_prompt)
-                st.write(response.text)
-            except Exception as e:
-                st.error(f"生成題目失敗：{e}")
+    st.title("🧠 情境測驗")
+    st.write("雲端同步正常。")
