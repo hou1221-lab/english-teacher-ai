@@ -1,96 +1,114 @@
 import streamlit as st
-import pandas as pd
+import google.generativeai as genai
+from PIL import Image
+import json
+import re
 import random
 
-# --- 1. 基礎設定 ---
-st.set_page_config(page_title="孩子英文學習機", layout="centered", page_icon="🍎")
+# --- 1. 核心設定 ---
+API_KEY = "AIzaSyCAHiqabmlZ1HVB4SLeyhsoqjU-HY05wiI"
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 初始化單字庫 (存在網頁記憶體中)
+st.set_page_config(page_title="英文學習小老師", layout="centered")
+
+# 初始化資料庫
 if 'word_bank' not in st.session_state:
     st.session_state.word_bank = []
 
-# --- 2. 左側導覽選單 ---
-st.sidebar.title("🎒 學習控制台")
-page = st.sidebar.radio("請選擇頁面", ["📝 第一頁：家長建立單字", "🎮 第二頁：英語選擇題"])
+# --- 2. 側邊欄選單 ---
+st.sidebar.title("🍀 學習選單")
+page = st.sidebar.radio("切換頁面", [
+    "🔒 家長拍照區", 
+    "✍️ 第一頁：拼字填空題", 
+    "📋 第二頁：單字總複習",
+    "🧠 第三頁：情境選擇題"
+])
 
-if st.sidebar.button("🗑️ 重設所有單字"):
-    st.session_state.word_bank = []
-    st.rerun()
-
-# --- 3. 第一頁：家長手動建立單字 ---
-if page == "📝 第一頁：家長建立單字":
-    st.title("📝 建立今日單字")
-    st.write("請在下方輸入想讓孩子練習的單字與中文。")
+# --- 3. 家長拍照區（隱藏圖片） ---
+if page == "🔒 家長拍照區":
+    st.title("🔒 家長出題區")
+    st.write("請家長拍照或上傳單字表，辨識完成後請切換頁面給孩子練習。")
     
-    # 建立輸入區
-    with st.form("word_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            new_word = st.text_input("英文單字 (例如: apple)").strip()
-        with col2:
-            new_def = st.text_input("中文意思 (例如: 蘋果)").strip()
-        
-        submitted = st.form_submit_button("➕ 加入題庫")
-        if submitted and new_word and new_def:
-            # 自動抓取首字母作為提示
-            hint = new_word[0].lower() if len(new_word) > 0 else ""
-            st.session_state.word_bank.append({
-                "word": new_word,
-                "definition": new_def,
-                "hint": hint
-            })
-            st.success(f"已加入：{new_word} ({new_def})")
-
-    # 顯示目前已有的單字
-    if st.session_state.word_bank:
-        st.subheader("👀 目前的單字清單")
-        df = pd.DataFrame(st.session_state.word_bank)
-        st.table(df)
-        
-        # 拼字練習區
-        st.divider()
-        st.subheader("✍️ 孩子拼字練習")
-        target = st.session_state.word_bank[-1] # 以最後加入的單字練習
-        st.write(f"題目：**{target['definition']}**")
-        st.write(f"提示：{target['word'][0]} {' _ ' * (len(target['word'])-1)}")
-        
-        child_ans = st.text_input("孩子請在這裡打上單字：", key="child_spell")
-        if child_ans:
-            if child_ans.lower() == target['word'].lower():
-                st.success("🎉 太棒了！拼對了！")
-                st.balloons()
-            else:
-                st.info("加油！再試一次喔！")
-
-# --- 4. 第二頁：英語選擇題模式 ---
-elif page == "🎮 第二頁：英語選擇題":
-    st.title("🎮 英語選擇題挑戰")
+    uploaded_file = st.file_uploader("上傳單字照片", type=["jpg", "png", "jpeg"])
     
-    if len(st.session_state.word_bank) < 4:
-        st.warning("⚠️ 題庫至少需要 4 個單字才能玩選擇題喔！請先回第一頁增加單字。")
+    if uploaded_file:
+        if st.button("🚀 開始辨識並隱藏圖片"):
+            img = Image.open(uploaded_file)
+            with st.spinner('AI 正在讀取單字中...'):
+                try:
+                    prompt = "Read image. Return ONLY a JSON list: [{'word':'英文','definition':'中文','hint':'首字母'}]"
+                    response = model.generate_content([prompt, img])
+                    match = re.search(r'\[.*\]', response.text, re.DOTALL)
+                    if match:
+                        st.session_state.word_bank = json.loads(match.group())
+                        st.success(f"✅ 成功辨識 {len(st.session_state.word_bank)} 個單字！圖片已自動遮蔽。")
+                        st.balloons()
+                    else:
+                        st.error("辨識失敗，請換張照片。")
+                except Exception as e:
+                    st.error(f"連線錯誤：{e}")
+
+# --- 4. 第一頁：拼字填空題 (10個單字=10題) ---
+elif page == "✍️ 第一頁：拼字填空題":
+    st.title("✍️ 拼字填空挑戰")
+    if not st.session_state.word_bank:
+        st.warning("請家長先去拍照出題喔！")
     else:
-        if st.button("🎲 產生新題目") or 'quiz_q' not in st.session_state:
-            # 隨機選一個正確答案
-            correct_item = random.choice(st.session_state.word_bank)
-            # 隨機選三個錯誤答案
-            others = [w['definition'] for w in st.session_state.word_bank if w != correct_item]
-            wrong_choices = random.sample(others, 3)
-            
-            choices = wrong_choices + [correct_item['definition']]
-            random.shuffle(choices) # 打亂選項順序
-            
-            st.session_state.quiz_q = correct_item['word']
-            st.session_state.quiz_ans = correct_item['definition']
-            st.session_state.quiz_choices = choices
+        st.write("請看中文意思，打出正確的英文單字：")
+        correct_count = 0
+        for i, item in enumerate(st.session_state.word_bank):
+            st.subheader(f"第 {i+1} 題：{item['definition']}")
+            # 顯示提示如 a _ _ _ _
+            placeholder = f"{item['word'][0].upper()} {'_ ' * (len(item['word'])-1)}"
+            ans = st.text_input(f"提示：{placeholder}", key=f"spell_{i}").strip()
+            if ans.lower() == item['word'].lower():
+                st.success("正確！✨")
+                correct_count += 1
+        
+        if correct_count == len(st.session_state.word_bank):
+            st.balloons()
 
-        st.subheader(f"請問單字 **{st.session_state.quiz_q}** 是什麼意思？")
+# --- 5. 第二頁：單字總複習 ---
+elif page == "📋 第二頁：單字總複習":
+    st.title("📋 今日單字清單")
+    if not st.session_state.word_bank:
+        st.warning("目前沒有單字。")
+    else:
+        st.table(st.session_state.word_bank)
+
+# --- 6. 第三頁：情境選擇題 ---
+elif page == "🧠 第三頁：情境選擇題":
+    st.title("🧠 情境測驗 (例句選擇)")
+    if len(st.session_state.word_bank) < 2:
+        st.warning("單字量不足，無法生成選擇題。")
+    else:
+        # 隨機選一題
+        if 'quiz_idx' not in st.session_state or st.button("換一題挑戰"):
+            st.session_state.quiz_idx = random.randint(0, len(st.session_state.word_bank)-1)
+            
+            # 叫 AI 生一個例句
+            target_word = st.session_state.word_bank[st.session_state.quiz_idx]['word']
+            try:
+                gen_prompt = f"Write a simple English sentence using the word '{target_word}'. Replace '{target_word}' with '_____' in the sentence."
+                res = model.generate_content(gen_prompt)
+                st.session_state.quiz_sentence = res.text
+            except:
+                st.session_state.quiz_sentence = f"An _____ a day keeps the doctor away." # 備用
+
+        st.subheader("請根據句子意思選出正確單字：")
+        st.info(st.session_state.quiz_sentence)
         
-        # 使用按鈕或下拉選單讓孩子選
-        user_choice = st.radio("請選擇最正確的答案：", st.session_state.quiz_choices)
+        # 製作選項
+        correct_ans = st.session_state.word_bank[st.session_state.quiz_idx]['word']
+        others = [w['word'] for w in st.session_state.word_bank if w['word'] != correct_ans]
+        options = random.sample(others, min(len(others), 3)) + [correct_ans]
+        random.shuffle(options)
         
-        if st.button("確認答案"):
-            if user_choice == st.session_state.quiz_ans:
-                st.success(f"✅ 沒錯！{st.session_state.quiz_q} 就是 {st.session_state.quiz_ans}！")
+        user_choice = st.radio("你的選擇：", options)
+        if st.button("檢查答案"):
+            if user_choice == correct_ans:
+                st.success("太厲害了！完全正確！")
                 st.balloons()
             else:
-                st.error("❌ 選錯了，再觀察看看喔！")
+                st.error("再想一下喔，這題有點難！")
