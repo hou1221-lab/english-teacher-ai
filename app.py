@@ -18,7 +18,6 @@ st.markdown("""
         font-weight: bold !important;
         line-height: 1.5;
     }
-    /* 放大單選按鈕的字體 */
     div[data-baseweb="radio"] label {
         font-size: 24px !important;
         font-weight: bold !important;
@@ -26,7 +25,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 初始化單字庫 (存在網頁記憶體)
+# 初始化單字庫
 if 'word_bank' not in st.session_state:
     st.session_state.word_bank = []
 
@@ -46,15 +45,12 @@ if st.sidebar.button("🗑️ 重設所有題目"):
 # --- 3. 家長出題區 ---
 if page == "🔒 家長出題區 (手動輸入)":
     st.title("🔒 家長手動出題")
-    st.write("請在這裡輸入單字。")
-    
     with st.form("add_word", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             eng = st.text_input("英文單字")
         with c2:
             chi = st.text_input("中文意思")
-        
         if st.form_submit_button("➕ 加入題庫"):
             if eng and chi:
                 st.session_state.word_bank.append({"word": eng.strip(), "definition": chi.strip()})
@@ -87,7 +83,6 @@ elif page == "🎮 第二頁：中選英 (四選一)":
     else:
         for i, item in enumerate(st.session_state.word_bank):
             st.markdown(f"<p class='big-font'>第 {i+1} 題：請問「{item['definition']}」的英文是？</p>", unsafe_allow_html=True)
-            
             correct = item['word']
             others = [w['word'] for w in st.session_state.word_bank if w['word'] != correct]
             opts = random.sample(others, min(len(others), 3)) + [correct]
@@ -95,3 +90,18 @@ elif page == "🎮 第二頁：中選英 (四選一)":
             
             choice = st.radio("選擇答案：", opts, key=f"q2_{i}")
             if st.button("檢查答案", key=f"btn2_{i}"):
+                if choice == correct:
+                    st.success("🎉 太棒了！")
+                else:
+                    st.error("再想一下喔！")
+
+# --- 6. 第三頁：題庫大挑戰 ---
+elif page == "🧠 第三頁：題庫大挑戰":
+    st.title("🧠 題庫綜合測驗")
+    if len(st.session_state.word_bank) < 4:
+        st.warning("單字量不足 4 個。")
+    else:
+        for i, item in enumerate(st.session_state.word_bank):
+            st.markdown(f"<p class='big-font'>{i+1}. 哪一個單字是「{item['definition']}」？</p>", unsafe_allow_html=True)
+            correct = item['word']
+            others = [w['word'] for w in st.session
