@@ -15,12 +15,10 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* 整體字體 */
 html, body, [class*="css"]  {
     font-size: 22px !important;
 }
 
-/* 標題 */
 h1 {
     font-size: 46px !important;
     font-weight: 900 !important;
@@ -34,7 +32,6 @@ h3 {
     font-weight: 800 !important;
 }
 
-/* 題目字體 */
 .big-font {
     font-size: 40px !important;
     font-weight: 900 !important;
@@ -42,32 +39,27 @@ h3 {
     margin-bottom: 12px !important;
 }
 
-/* 一般說明文字 */
 .normal-font {
     font-size: 24px !important;
     line-height: 1.6 !important;
 }
 
-/* 輸入框 */
 .stTextInput input {
     font-size: 30px !important;
     height: 68px !important;
     font-weight: bold !important;
 }
 
-/* TextArea */
 textarea {
     font-size: 22px !important;
 }
 
-/* Radio 選項 */
 div[data-baseweb="radio"] label {
     font-size: 28px !important;
     font-weight: bold !important;
     line-height: 1.8 !important;
 }
 
-/* 按鈕 */
 .stButton button {
     font-size: 24px !important;
     font-weight: bold !important;
@@ -75,13 +67,11 @@ div[data-baseweb="radio"] label {
     border-radius: 12px !important;
 }
 
-/* Tabs */
 button[data-baseweb="tab"] {
     font-size: 22px !important;
     font-weight: bold !important;
 }
 
-/* Sidebar */
 section[data-testid="stSidebar"] * {
     font-size: 20px !important;
 }
@@ -94,26 +84,14 @@ section[data-testid="stSidebar"] * {
 if "word_bank" not in st.session_state:
     st.session_state.word_bank = []
 
-if "challenge_order" not in st.session_state:
-    st.session_state.challenge_order = []
-
-if "challenge_index" not in st.session_state:
-    st.session_state.challenge_index = 0
-
-if "challenge_score" not in st.session_state:
-    st.session_state.challenge_score = 0
-
 if "challenge_wrong" not in st.session_state:
     st.session_state.challenge_wrong = []
 
-if "challenge_answered" not in st.session_state:
-    st.session_state.challenge_answered = False
+if "challenge_submitted" not in st.session_state:
+    st.session_state.challenge_submitted = False
 
-if "challenge_selected" not in st.session_state:
-    st.session_state.challenge_selected = None
-
-if "challenge_result" not in st.session_state:
-    st.session_state.challenge_result = None
+if "challenge_score" not in st.session_state:
+    st.session_state.challenge_score = 0
 
 # =========================================
 # 3. 工具函式
@@ -170,8 +148,7 @@ def parse_bulk_text(text):
             eng = clean_text(parts[0]).lower()
             chi = clean_text(parts[1])
 
-            # 英文只保留合理格式
-            if re.fullmatch(r"[A-Za-z][A-Za-z\-\s']*", eng):
+            if re.fullmatch(r"[A-Za-z][A-Za-z\\-\\s']*", eng):
                 results.append({"word": eng, "definition": chi})
 
     return deduplicate_words(results)
@@ -202,15 +179,42 @@ def load_words_from_pdf(pdf_file):
             text += page_text + "\n"
     return text
 
-def reset_challenge():
-    st.session_state.challenge_order = list(range(len(st.session_state.word_bank)))
-    random.shuffle(st.session_state.challenge_order)
-    st.session_state.challenge_index = 0
-    st.session_state.challenge_score = 0
+def reset_challenge_results():
     st.session_state.challenge_wrong = []
-    st.session_state.challenge_answered = False
-    st.session_state.challenge_selected = None
-    st.session_state.challenge_result = None
+    st.session_state.challenge_submitted = False
+    st.session_state.challenge_score = 0
+
+def generate_sentence(word, definition):
+    """
+    第三頁用的句子題。
+    優先依中文意思決定句子，抓不到時用通用句。
+    """
+    text = clean_text(definition)
+
+    rules = [
+        (["帳目", "帳戶", "戶頭"], "We check the money in the ______."),
+        (["意外", "事故"], "It was an ______ on the road."),
+        (["冒險"], "The trip was a great ______."),
+        (["活動"], "The school has a fun ______ today."),
+        (["優點", "好處"], "Reading is a big ______."),
+        (["欽佩", "欣賞"], "I really ______ her courage."),
+        (["疼痛"], "I have an ______ in my leg."),
+        (["達成", "成就"], "She worked hard to ______ her goal."),
+        (["接受", "可接受"], "This answer is ______ to me."),
+        (["一致", "符合", "同意"], "I ______ with your idea."),
+        (["說明", "解釋"], "The teacher gives an ______ in class."),
+        (["演員"], "The ______ is very famous."),
+        (["行動", "動作"], "The hero takes quick ______."),
+        (["活躍"], "She is very ______ in class."),
+        (["住址", "地址"], "Please write your home ______."),
+    ]
+
+    for keywords, sentence in rules:
+        if any(k in text for k in keywords):
+            return sentence
+
+    # 預設通用句
+    return f"This word means: {definition}. Choose the best answer for the ______."
 
 # =========================================
 # 4. 側邊欄
@@ -222,14 +226,14 @@ page = st.sidebar.radio(
         "📝 家長建立題庫",
         "✍️ 第一頁：中文提示拼英文",
         "🎯 第二頁：英文選中文",
-        "🧠 第三頁：闖關總複習",
+        "🧠 第三頁：句子選英文",
         "📚 錯題本"
     ]
 )
 
 if st.sidebar.button("🗑️ 重設全部題庫"):
     st.session_state.word_bank = []
-    reset_challenge()
+    reset_challenge_results()
     st.rerun()
 
 # =========================================
@@ -262,7 +266,7 @@ if page == "📝 家長建立題庫":
 
     with tab2:
         st.markdown("<p class='normal-font'>請一行一筆，例如：</p>", unsafe_allow_html=True)
-        st.code("apple 蘋果\nbanana 香蕉\norange 橘子\naccount 帳目")
+        st.code("apple 蘋果\nbanana 香蕉\norange 橘子\naccount 帳目、說明")
         st.markdown("<p class='normal-font'>也支援逗號格式：</p>", unsafe_allow_html=True)
         st.code("apple,蘋果\nbanana,香蕉")
 
@@ -367,96 +371,62 @@ elif page == "🎯 第二頁：英文選中文":
                     st.error(f"❌ 正確答案是：{correct}")
 
 # =========================================
-# 8. 第三頁：闖關總複習
+# 8. 第三頁：句子選英文（一次列出全部）
 # =========================================
-elif page == "🧠 第三頁：闖關總複習":
+elif page == "🧠 第三頁：句子選英文":
     st.title("🧠 題庫總複習")
 
     if len(st.session_state.word_bank) < 4:
-        st.warning("⚠️ 至少要 4 個單字才能做四選一闖關。")
+        st.warning("⚠️ 至少要 4 個單字才能做四選一。")
     else:
-        if not st.session_state.challenge_order or len(st.session_state.challenge_order) != len(st.session_state.word_bank):
-            reset_challenge()
+        st.markdown(
+            "<p class='normal-font'>請根據句子內容，選出最適合的英文單字。全部作答後，再按一次按鈕結算分數。</p>",
+            unsafe_allow_html=True
+        )
 
-        total = len(st.session_state.challenge_order)
-        current_idx = st.session_state.challenge_index
+        score = 0
+        wrong_list = []
 
-        if current_idx >= total:
-            st.success(f"🎉 闖關完成！總分：{st.session_state.challenge_score} / {total}")
+        for i, item in enumerate(st.session_state.word_bank):
+            sentence = generate_sentence(item["word"], item["definition"])
+            correct = item["word"]
+            options = make_choice_list(correct, st.session_state.word_bank, "word")
 
-            if st.session_state.challenge_score == total:
+            st.markdown(
+                f"<p class='big-font'>第 {i+1} 題：{sentence}</p>",
+                unsafe_allow_html=True
+            )
+
+            user_choice = st.radio("請選擇：", options, key=f"q3_{i}")
+
+            if user_choice == correct:
+                score += 1
+            else:
+                wrong_list.append({
+                    "題號": i + 1,
+                    "句子": sentence,
+                    "中文意思": item["definition"],
+                    "你的答案": user_choice,
+                    "正確答案": correct
+                })
+
+        if st.button("📊 送出結算分數"):
+            st.session_state.challenge_score = score
+            st.session_state.challenge_wrong = wrong_list
+            st.session_state.challenge_submitted = True
+            st.rerun()
+
+        if st.session_state.challenge_submitted:
+            st.success(f"總分：{st.session_state.challenge_score} / {len(st.session_state.word_bank)}")
+
+            if st.session_state.challenge_score == len(st.session_state.word_bank):
                 st.balloons()
-                st.success("太厲害了，全對！")
+                st.success("全部答對！")
 
             if st.session_state.challenge_wrong:
                 st.subheader("❌ 本次錯題")
                 wrong_df = pd.DataFrame(st.session_state.challenge_wrong)
                 st.dataframe(wrong_df, use_container_width=True)
-            else:
-                st.success("本次沒有錯題！")
-
-            if st.button("🔁 再玩一次"):
-                reset_challenge()
-                st.rerun()
-
-        else:
-            q_number = current_idx + 1
-            item_index = st.session_state.challenge_order[current_idx]
-            item = st.session_state.word_bank[item_index]
-
-            st.markdown(
-                f"<p class='normal-font'>目前進度：第 {q_number} 題 / 共 {total} 題</p>",
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                f"<p class='normal-font'>目前分數：{st.session_state.challenge_score}</p>",
-                unsafe_allow_html=True
-            )
-
-            st.markdown(
-                f"<p class='big-font'>第 {q_number} 題：「{item['definition']}」是哪個英文單字？</p>",
-                unsafe_allow_html=True
-            )
-
-            correct = item["word"]
-            options = make_choice_list(correct, st.session_state.word_bank, "word")
-
-            selected = st.radio(
-                "請選擇：",
-                options,
-                key=f"challenge_radio_{current_idx}"
-            )
-
-            if not st.session_state.challenge_answered:
-                if st.button("✅ 送出答案"):
-                    st.session_state.challenge_selected = selected
-                    if selected == correct:
-                        st.session_state.challenge_score += 1
-                        st.session_state.challenge_result = True
-                    else:
-                        st.session_state.challenge_result = False
-                        st.session_state.challenge_wrong.append({
-                            "題號": q_number,
-                            "中文": item["definition"],
-                            "你的答案": selected,
-                            "正確答案": correct
-                        })
-
-                    st.session_state.challenge_answered = True
-                    st.rerun()
-
-            else:
-                if st.session_state.challenge_result:
-                    st.success("🎉 答對了！")
-                else:
-                    st.error(f"❌ 答錯了！正確答案是：{correct}")
-
-                if st.button("➡️ 下一題"):
-                    st.session_state.challenge_index += 1
-                    st.session_state.challenge_answered = False
-                    st.session_state.challenge_selected = None
-                    st.session_state.challenge_result = None
-                    st.rerun()
 
 # =========================================
 # 9. 錯題本
@@ -465,7 +435,7 @@ elif page == "📚 錯題本":
     st.title("📚 錯題本")
 
     if st.session_state.challenge_wrong:
-        st.markdown("<p class='normal-font'>這裡會顯示最近一次闖關答錯的題目。</p>", unsafe_allow_html=True)
+        st.markdown("<p class='normal-font'>這裡會顯示最近一次第三頁答錯的題目。</p>", unsafe_allow_html=True)
         wrong_df = pd.DataFrame(st.session_state.challenge_wrong)
         st.dataframe(wrong_df, use_container_width=True)
 
@@ -477,4 +447,4 @@ elif page == "📚 錯題本":
             mime="text/csv"
         )
     else:
-        st.info("目前還沒有錯題紀錄。先去『闖關總複習』玩一輪吧。")
+        st.info("目前還沒有錯題紀錄。先去第三頁做一輪吧。")
