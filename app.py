@@ -15,7 +15,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-html, body, [class*="css"]  {
+html, body, [class*="css"] {
     font-size: 22px !important;
 }
 
@@ -87,11 +87,11 @@ if "word_bank" not in st.session_state:
 if "challenge_wrong" not in st.session_state:
     st.session_state.challenge_wrong = []
 
-if "challenge_submitted" not in st.session_state:
-    st.session_state.challenge_submitted = False
-
 if "challenge_score" not in st.session_state:
     st.session_state.challenge_score = 0
+
+if "challenge_submitted" not in st.session_state:
+    st.session_state.challenge_submitted = False
 
 # =========================================
 # 3. 工具函式
@@ -135,8 +135,6 @@ def parse_bulk_text(text):
         if not line:
             continue
 
-        parts = None
-
         if "," in line:
             parts = [x.strip() for x in line.split(",", 1)]
         elif "\t" in line:
@@ -148,7 +146,7 @@ def parse_bulk_text(text):
             eng = clean_text(parts[0]).lower()
             chi = clean_text(parts[1])
 
-            if re.fullmatch(r"[A-Za-z][A-Za-z\\-\\s']*", eng):
+            if re.fullmatch(r"[A-Za-z][A-Za-z\-\s']*", eng):
                 results.append({"word": eng, "definition": chi})
 
     return deduplicate_words(results)
@@ -181,40 +179,63 @@ def load_words_from_pdf(pdf_file):
 
 def reset_challenge_results():
     st.session_state.challenge_wrong = []
-    st.session_state.challenge_submitted = False
     st.session_state.challenge_score = 0
+    st.session_state.challenge_submitted = False
 
-def generate_sentence(word, definition):
+def get_sentence_by_definition(word, definition):
     """
-    第三頁用的句子題。
-    優先依中文意思決定句子，抓不到時用通用句。
+    第三頁只出有明確句型的題。
+    沒對應句型就回傳 None，不出題。
     """
     text = clean_text(definition)
 
     rules = [
-        (["帳目", "帳戶", "戶頭"], "We check the money in the ______."),
+        (["一致", "符合", "同意"], "I ______ with your idea."),
+        (["可接受", "可接受的", "合意", "合意的"], "This answer is ______ to me."),
         (["意外", "事故"], "It was an ______ on the road."),
-        (["冒險"], "The trip was a great ______."),
-        (["活動"], "The school has a fun ______ today."),
-        (["優點", "好處"], "Reading is a big ______."),
+        (["帳目", "帳戶", "戶頭", "帳"], "We check the money in the ______."),
+        (["廣告"], "I saw an ______ on TV."),
+        (["採用", "收養"], "They decided to ______ the new plan."),
         (["欽佩", "欣賞"], "I really ______ her courage."),
         (["疼痛"], "I have an ______ in my leg."),
-        (["達成", "成就"], "She worked hard to ______ her goal."),
-        (["接受", "可接受"], "This answer is ______ to me."),
-        (["一致", "符合", "同意"], "I ______ with your idea."),
-        (["說明", "解釋"], "The teacher gives an ______ in class."),
+        (["達成", "完成"], "She worked hard to ______ her goal."),
+        (["忠告", "建議"], "My teacher gave me good ______."),
+        (["活動"], "The school has a fun ______ today."),
+        (["冒險"], "The trip was a great ______."),
+        (["優點", "好處"], "Reading is a big ______."),
+        (["承認"], "He did not ______ his mistake."),
+        (["地址", "住址"], "Please write your home ______."),
         (["演員"], "The ______ is very famous."),
-        (["行動", "動作"], "The hero takes quick ______."),
         (["活躍"], "She is very ______ in class."),
-        (["住址", "地址"], "Please write your home ______."),
+        (["增加", "加上"], "Please ______ some sugar to the tea."),
+        (["額外", "另外"], "We need ______ time."),
+        (["成年", "成人"], "He became an ______ last year."),
+        (["先進", "高級"], "This is an ______ machine."),
+        (["準確", "精確", "正確"], "The answer is ______."),
+        (["達成", "成就"], "Winning the prize was a great ______."),
+        (["行動", "動作"], "The hero takes quick ______."),
     ]
 
     for keywords, sentence in rules:
         if any(k in text for k in keywords):
             return sentence
 
-    # 預設通用句
-    return f"This word means: {definition}. Choose the best answer for the ______."
+    return None
+
+def build_sentence_quiz_items(word_bank):
+    """
+    只挑有句型的單字建立第三頁題目
+    """
+    quiz_items = []
+    for item in word_bank:
+        sentence = get_sentence_by_definition(item["word"], item["definition"])
+        if sentence:
+            quiz_items.append({
+                "word": item["word"],
+                "definition": item["definition"],
+                "sentence": sentence
+            })
+    return quiz_items
 
 # =========================================
 # 4. 側邊欄
@@ -266,7 +287,7 @@ if page == "📝 家長建立題庫":
 
     with tab2:
         st.markdown("<p class='normal-font'>請一行一筆，例如：</p>", unsafe_allow_html=True)
-        st.code("apple 蘋果\nbanana 香蕉\norange 橘子\naccount 帳目、說明")
+        st.code("apple 蘋果\nbanana 香蕉\naccord 一致、符合\naccount 帳目、說明")
         st.markdown("<p class='normal-font'>也支援逗號格式：</p>", unsafe_allow_html=True)
         st.code("apple,蘋果\nbanana,香蕉")
 
@@ -283,7 +304,7 @@ if page == "📝 家長建立題庫":
     with tab3:
         st.markdown("<p class='normal-font'>上傳 PDF 後，系統會先把文字抓出來，再轉成題庫。</p>", unsafe_allow_html=True)
         st.markdown("<p class='normal-font'>PDF 內容最好是這種格式：</p>", unsafe_allow_html=True)
-        st.code("apple 蘋果\nbanana 香蕉\naccord 一致、符合\nacceptable 可接受的，合意的")
+        st.code("accord 一致、符合\nacceptable 可接受的，合意的\naccident 意外事件，事故\naccount 帳目、說明")
 
         pdf_file = st.file_uploader("上傳 PDF 單字表", type=["pdf"], key="pdf_uploader")
 
@@ -371,25 +392,29 @@ elif page == "🎯 第二頁：英文選中文":
                     st.error(f"❌ 正確答案是：{correct}")
 
 # =========================================
-# 8. 第三頁：句子選英文（一次列出全部）
+# 8. 第三頁：句子選英文（一次列出全部，最後統一檢查）
 # =========================================
 elif page == "🧠 第三頁：句子選英文":
     st.title("🧠 題庫總複習")
 
+    quiz_items = build_sentence_quiz_items(st.session_state.word_bank)
+
     if len(st.session_state.word_bank) < 4:
-        st.warning("⚠️ 至少要 4 個單字才能做四選一。")
+        st.warning("⚠️ 題庫至少要有 4 個單字。")
+    elif len(quiz_items) < 1:
+        st.warning("⚠️ 目前題庫中，沒有可用來出句型題的單字。請加入像 accord、acceptable、accident、account 這種有明確句型的單字。")
     else:
         st.markdown(
-            "<p class='normal-font'>請根據句子內容，選出最適合的英文單字。全部作答後，再按一次按鈕結算分數。</p>",
+            "<p class='normal-font'>請根據句子內容，選出最適合的英文單字。全部作答後，再按一次按鈕檢查答案。</p>",
             unsafe_allow_html=True
         )
 
         score = 0
         wrong_list = []
 
-        for i, item in enumerate(st.session_state.word_bank):
-            sentence = generate_sentence(item["word"], item["definition"])
+        for i, item in enumerate(quiz_items):
             correct = item["word"]
+            sentence = item["sentence"]
             options = make_choice_list(correct, st.session_state.word_bank, "word")
 
             st.markdown(
@@ -410,23 +435,26 @@ elif page == "🧠 第三頁：句子選英文":
                     "正確答案": correct
                 })
 
-        if st.button("📊 送出結算分數"):
+        if st.button("📊 檢查答案並結算分數"):
             st.session_state.challenge_score = score
             st.session_state.challenge_wrong = wrong_list
             st.session_state.challenge_submitted = True
             st.rerun()
 
         if st.session_state.challenge_submitted:
-            st.success(f"總分：{st.session_state.challenge_score} / {len(st.session_state.word_bank)}")
+            st.success(f"總分：{st.session_state.challenge_score} / {len(quiz_items)}")
 
-            if st.session_state.challenge_score == len(st.session_state.word_bank):
+            if st.session_state.challenge_score == len(quiz_items):
                 st.balloons()
                 st.success("全部答對！")
 
+            st.subheader("📌 作答結果")
+
             if st.session_state.challenge_wrong:
-                st.subheader("❌ 本次錯題")
                 wrong_df = pd.DataFrame(st.session_state.challenge_wrong)
                 st.dataframe(wrong_df, use_container_width=True)
+            else:
+                st.success("本次沒有錯題！")
 
 # =========================================
 # 9. 錯題本
